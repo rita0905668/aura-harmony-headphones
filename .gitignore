@@ -3,3 +3,10 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# 私人訂單與金流檔案（嚴格禁止上傳至 GitHub，僅本地私密保存）
+private_records/
+orders/
+*.csv
+*.xlsx
+

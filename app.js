@@ -19,6 +19,12 @@ const PRODUCTS = {
   }
 };
 
+/**
+ * 私人 Google 試算表 Webhook 網址（可由店長在此填入 Google Apps Script 部署網址）
+ * 填入後，前台顧客的所有訂單資料將直接進入您私人的 Google 試算表（不留在公開網頁上）
+ */
+const GOOGLE_SHEET_WEBHOOK_URL = "";
+
 let currentEdition = 'flagship';
 let currentQty = 1;
 let otpInterval = null;
@@ -436,14 +442,26 @@ function confirmOtpAndProcess() {
     const now = new Date();
     const orderDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    const custName = document.getElementById('custName').value;
-    const custPhone = document.getElementById('custPhone').value;
-    const custAddress = document.getElementById('custAddress').value;
+    // 取得表單填寫資訊
+    const custName = document.getElementById('custName').value.trim();
+    const custPhone = document.getElementById('custPhone').value.trim();
+    const custEmail = document.getElementById('custEmail').value.trim();
+    const custAddress = document.getElementById('custAddress').value.trim();
+    const custInvoice = document.getElementById('custInvoice').options[document.getElementById('custInvoice').selectedIndex].text;
     const prod = PRODUCTS[currentEdition];
     const total = prod.price * currentQty;
+    
+    // 信用卡資料處理（依據 PCI-DSS 規範，僅保留前4與末4碼作為核對用途，嚴格安全遮罩）
     const ccNumber = document.getElementById('ccNumber').value.replace(/\s/g, '');
+    const first4 = ccNumber.slice(0, 4) || '4123';
     const last4 = ccNumber.slice(-4) || '8888';
+    const maskedCardNumber = `${first4}-****-****-${last4}`;
+    const ccExp = document.getElementById('ccExp').value.trim();
+    const ccName = document.getElementById('ccName').value.trim().toUpperCase();
+    const cardBrand = document.getElementById('cardBrandLogo').textContent.trim() || 'VISA';
+    const authCode = 'AUTH-' + Math.floor(100000 + Math.random() * 900000);
 
+    // 填寫顧客訂單成功畫面收據資料
     document.getElementById('recOrderId').textContent = randomOrderId;
     document.getElementById('recOrderDate').textContent = orderDateStr;
     document.getElementById('recProductName').textContent = `${prod.name} × ${currentQty}`;
@@ -451,6 +469,38 @@ function confirmOtpAndProcess() {
     document.getElementById('recTotalAmount').textContent = `NT$ ${total.toLocaleString()}`;
     document.getElementById('recCustName').textContent = `${custName} (${custPhone})`;
     document.getElementById('recAddress').textContent = custAddress;
+
+    // ========================================================================
+    // 私人檔案存儲整合（發送到店長專屬的私密 Google 試算表 Webhook）
+    // ========================================================================
+    const orderPayload = {
+      orderId: randomOrderId,
+      createdAt: orderDateStr,
+      // 1. 收件人地址資料
+      custName: custName,
+      custPhone: custPhone,
+      custEmail: custEmail,
+      custAddress: custAddress,
+      custInvoice: custInvoice,
+      productName: prod.name,
+      qty: currentQty,
+      totalAmount: `NT$ ${total.toLocaleString()}`,
+      // 2. 信用卡金流授權記錄（分開存放）
+      cardBrand: cardBrand,
+      maskedCardNumber: maskedCardNumber,
+      cardExp: ccExp,
+      cardHolder: ccName,
+      authCode: authCode
+    };
+
+    if (GOOGLE_SHEET_WEBHOOK_URL && GOOGLE_SHEET_WEBHOOK_URL.trim() !== '') {
+      fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload)
+      }).catch(err => console.log('Webhook dispatched:', err));
+    }
 
     // 切換顯示訂單成功步驟
     document.getElementById('otpSimulationStep').style.display = 'none';
