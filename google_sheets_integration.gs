@@ -1,22 +1,23 @@
 /**
  * ============================================================================
- * AURA Harmony 降噪耳機 - 私人專屬 Google 試算表自動記錄與 Excel 匯出腳本
+ * AURA Harmony 降噪耳機 - Google 試算表後端資料庫整合腳本 (GAS Webhook)
  * ============================================================================
  *
  * 【功能說明】：
- * 1. 顧客在公開網站下單後，資料「不會」顯示在任何公開網頁上。
- * 2. 透過此腳本，資料會直接寫入您私人的 Google 試算表（只有您登入自己的 Google 帳號才能看到）。
- * 3. 系統自動將「收件人地址清單」與「信用卡金流授權記錄」分開存放於兩個不同分頁中。
- * 4. 隨時可在試算表中點擊【檔案】->【下載】->【Microsoft Excel (.xlsx)】取得 Excel 檔案。
+ * 1. 完整對應前台 HTML 與 JavaScript 結帳資訊，100% 欄位統一。
+ * 2. 分頁 1【訂單管理總表】：自動彙整訂單編號、時間、商品規格、金額、收件人資料、
+ *    發票資訊、訂單備註、安全金流授權記錄，並預留「物流單號」與「內部註記」供店家維護。
+ * 3. 分頁 2【顧客評價收集表】：前台顧客送出產品評分與心得時，自動分流至此分頁。
+ * 4. 隨時可在試算表中點擊【檔案】->【下載】->【Microsoft Excel (.xlsx)】匯出管理。
  *
  * 【設定只需 3 分鐘】：
  * 步驟 1：前往 Google 雲端硬碟 (Google Drive)，點擊「新增」->「Google 試算表」，命名為：
- *         「AURA 耳機私人訂單中心」
+ *         「AURA Harmony 官方訂單中心」
  * 步驟 2：在該試算表上方選單點選【擴充功能】(Extensions) -> 【Apps Script】。
  * 步驟 3：清空編輯器中原有代碼，將「本檔案中的全部代碼」複製並貼上，按 Ctrl+S 儲存。
  * 步驟 4：點擊右上角藍色【部署】按鈕 -> 選擇【新部署作業】。
  *         - 齒輪圖示請選擇【網頁應用程式】(Web app)
- *         - 說明：訂單接收服務
+ *         - 說明：AURA 訂單與評價接收服務
  *         - 執行身分：選擇【我】(Me)
  *         - 誰可以存取：選擇【任何人】(Anyone) —— 這樣公開網站才能傳送資料
  * 步驟 5：點擊【部署】，複製產生的「網頁應用程式網址 (Web App URL)」。
@@ -29,70 +30,101 @@ function doPost(e) {
   lock.tryLock(15000);
 
   try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
     var payload = JSON.parse(e.postData.contents);
 
     // ========================================================================
-    // 分開記錄 1：【收件配送清單】（僅記錄物流與聯絡人，絕無卡號資料）
+    // 分流 A：顧客評價心得收集表
     // ========================================================================
-    var shippingSheet = sheet.getSheetByName("收件配送清單");
-    if (!shippingSheet) {
-      shippingSheet = sheet.insertSheet("收件配送清單");
-      // 建立表頭
-      shippingSheet.appendRow([
-        "訂單編號", "訂購時間", "收件人姓名", "手機號碼", "電子信箱", 
-        "配送地址", "發票類型", "訂購品項", "數量", "實付金額 (TWD)", "出貨狀態"
+    if (payload.type === "review") {
+      var reviewSheet = ss.getSheetByName("顧客評價收集表");
+      if (!reviewSheet) {
+        reviewSheet = ss.insertSheet("顧客評價收集表");
+        var reviewHeaders = [
+          "評價時間", "顧客暱稱", "體驗版本", "評分星級", "評價標題", "心得內容", "審核狀態"
+        ];
+        reviewSheet.appendRow(reviewHeaders);
+
+        // 表頭樣式美化
+        var rHeaderRange = reviewSheet.getRange(1, 1, 1, reviewHeaders.length);
+        rHeaderRange.setFontWeight("bold")
+                    .setBackground("#4a5568")
+                    .setFontColor("#ffffff")
+                    .setHorizontalAlignment("center");
+        reviewSheet.setFrozenRows(1);
+        reviewSheet.setRowHeight(1, 35);
+      }
+
+      reviewSheet.appendRow([
+        payload.createdAt,
+        payload.reviewerName,
+        payload.reviewedEdition,
+        payload.reviewScore,
+        payload.reviewTitle,
+        payload.reviewComment,
+        "已上架公開"
       ]);
-      // 標題列美化（粉藕色背景與粗體）
-      shippingSheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#f4e4e7");
-      shippingSheet.setFrozenRows(1);
+
+      reviewSheet.autoResizeColumns(1, 7);
+
+      return ContentService
+        .createTextOutput(JSON.stringify({ "status": "success", "type": "review" }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
-    shippingSheet.appendRow([
+    // ========================================================================
+    // 分流 B：核心【訂單管理總表】（共 21 個精準欄位）
+    // ========================================================================
+    var orderSheet = ss.getSheetByName("訂單管理總表");
+    if (!orderSheet) {
+      orderSheet = ss.insertSheet("訂單管理總表");
+      var orderHeaders = [
+        "訂單編號", "下單時間", "訂單狀態",
+        "商品版本", "商品規格與顏色", "購買數量", "實付金額 (TWD)",
+        "收件人姓名", "手機號碼", "電子信箱", "配送地址", "訂單備註",
+        "發票類型", "載具或統編",
+        "發卡組織", "信用卡卡號 (安全遮罩)", "持卡人姓名", "金流授權碼", "金流驗證狀態",
+        "物流追蹤單號", "內部管理註記"
+      ];
+      orderSheet.appendRow(orderHeaders);
+
+      // 表頭美化：深藍灰底色 + 白字粗體 + 置中 + 凍結首列
+      var headerRange = orderSheet.getRange(1, 1, 1, orderHeaders.length);
+      headerRange.setFontWeight("bold")
+                 .setBackground("#2c3e50")
+                 .setFontColor("#ffffff")
+                 .setHorizontalAlignment("center");
+      orderSheet.setFrozenRows(1);
+      orderSheet.setRowHeight(1, 36);
+    }
+
+    // 依序寫入欄位（完全與 app.js payload 鍵值 1:1 對齊）
+    orderSheet.appendRow([
       payload.orderId,
       payload.createdAt,
+      payload.orderStatus || "備貨中",
+      payload.productEdition || "高階版",
+      payload.productSpec || "AURA Harmony",
+      payload.qty || 1,
+      payload.totalAmount, // 純數字，便於 SUM 統計
       payload.custName,
       payload.custPhone,
       payload.custEmail,
       payload.custAddress,
+      payload.orderNotes || "",
       payload.custInvoice,
-      payload.productName,
-      payload.qty,
-      payload.totalAmount,
-      "備貨中（已付款）"
-    ]);
-
-    // ========================================================================
-    // 分開記錄 2：【金流授權記錄】（獨立存放金流核對，卡號安全遮罩）
-    // ========================================================================
-    var paymentSheet = sheet.getSheetByName("金流授權記錄");
-    if (!paymentSheet) {
-      paymentSheet = sheet.insertSheet("金流授權記錄");
-      // 建立表頭
-      paymentSheet.appendRow([
-        "關聯訂單編號", "交易時間", "發卡組織 (VISA/MC/JCB)", "信用卡卡號 (前4後4安全遮罩)", 
-        "有效月年", "持卡人英文名", "3D 簡訊驗證狀態", "銀行授權碼", "交易狀態"
-      ]);
-      // 標題列美化（淺藍灰背景與粗體）
-      paymentSheet.getRange(1, 1, 1, 9).setFontWeight("bold").setBackground("#e6ecf2");
-      paymentSheet.setFrozenRows(1);
-    }
-
-    paymentSheet.appendRow([
-      payload.orderId,
-      payload.createdAt,
+      payload.invoiceCarrier || "",
       payload.cardBrand || "VISA",
-      payload.maskedCardNumber, // 嚴格遮罩，例如 4123-****-****-2345，保護資安
-      payload.cardExp,
+      payload.maskedCardNumber, // 前4後4遮罩，符合資安規範
       payload.cardHolder,
-      "OTP 簡訊驗證通過",
       payload.authCode,
-      "授權扣款成功"
+      payload.paymentStatus || "3D OTP 驗證成功",
+      "", // 物流追蹤單號（留空供店家手動填寫）
+      ""  // 內部管理註記（留空供店家手動填寫）
     ]);
 
-    // 自動調整欄寬
-    shippingSheet.autoResizeColumns(1, 11);
-    paymentSheet.autoResizeColumns(1, 9);
+    // 自動調整各欄寬度
+    orderSheet.autoResizeColumns(1, 21);
 
     return ContentService
       .createTextOutput(JSON.stringify({ "status": "success", "orderId": payload.orderId }))

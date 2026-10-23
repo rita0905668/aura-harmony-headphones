@@ -23,7 +23,7 @@ const PRODUCTS = {
  * 私人 Google 試算表 Webhook 網址（可由店長在此填入 Google Apps Script 部署網址）
  * 填入後，前台顧客的所有訂單資料將直接進入您私人的 Google 試算表（不留在公開網頁上）
  */
-const GOOGLE_SHEET_WEBHOOK_URL = "";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMpLEWC-T9b0vRLPXGjfqmI07zozh27AfhTHu-1uJtgoJ8_0zlIYExf58nzjJ4sC4/exec";
 
 let currentEdition = 'flagship';
 let currentQty = 1;
@@ -216,6 +216,26 @@ function initReviewSystem() {
       `;
 
       reviewsGrid.prepend(newCard);
+
+      // 同步發送評價至私密 Google 試算表（若有設定 Webhook）
+      const reviewPayload = {
+        type: 'review',
+        createdAt: new Date().toLocaleString('zh-TW', { hour12: false }),
+        reviewerName: name,
+        reviewedEdition: edition,
+        reviewScore: score,
+        reviewTitle: title,
+        reviewComment: comment
+      };
+
+      if (GOOGLE_SHEET_WEBHOOK_URL && GOOGLE_SHEET_WEBHOOK_URL.trim() !== '') {
+        fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(reviewPayload)
+        }).catch(err => console.log('Review Webhook error:', err));
+      }
 
       // 重置並收起表單
       newReviewForm.reset();
@@ -447,8 +467,11 @@ function confirmOtpAndProcess() {
     const custPhone = document.getElementById('custPhone').value.trim();
     const custEmail = document.getElementById('custEmail').value.trim();
     const custAddress = document.getElementById('custAddress').value.trim();
+    const custNotes = document.getElementById('custNotes') ? document.getElementById('custNotes').value.trim() : '';
     const custInvoice = document.getElementById('custInvoice').options[document.getElementById('custInvoice').selectedIndex].text;
+    const custCarrier = document.getElementById('custCarrier') ? document.getElementById('custCarrier').value.trim() : '';
     const prod = PRODUCTS[currentEdition];
+    const editionName = currentEdition === 'flagship' ? '高階版' : '普通版';
     const total = prod.price * currentQty;
     
     // 信用卡資料處理（依據 PCI-DSS 規範，僅保留前4與末4碼作為核對用途，嚴格安全遮罩）
@@ -476,28 +499,31 @@ function confirmOtpAndProcess() {
     const orderPayload = {
       orderId: randomOrderId,
       createdAt: orderDateStr,
-      // 1. 收件人地址資料
+      orderStatus: '備貨中',
+      productEdition: editionName,
+      productSpec: prod.name,
+      qty: currentQty,
+      totalAmount: total, // 傳送純整數數字，方便試算表公式計算與加總
       custName: custName,
       custPhone: custPhone,
       custEmail: custEmail,
       custAddress: custAddress,
+      orderNotes: custNotes,
       custInvoice: custInvoice,
-      productName: prod.name,
-      qty: currentQty,
-      totalAmount: `NT$ ${total.toLocaleString()}`,
-      // 2. 信用卡金流授權記錄（分開存放）
+      invoiceCarrier: custCarrier,
+      paymentMethod: '信用卡線上付款',
       cardBrand: cardBrand,
       maskedCardNumber: maskedCardNumber,
-      cardExp: ccExp,
       cardHolder: ccName,
-      authCode: authCode
+      authCode: authCode,
+      paymentStatus: '3D OTP 驗證成功'
     };
 
     if (GOOGLE_SHEET_WEBHOOK_URL && GOOGLE_SHEET_WEBHOOK_URL.trim() !== '') {
       fetch(GOOGLE_SHEET_WEBHOOK_URL, {
         method: 'POST',
         mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(orderPayload)
       }).catch(err => console.log('Webhook dispatched:', err));
     }
@@ -506,6 +532,34 @@ function confirmOtpAndProcess() {
     document.getElementById('otpSimulationStep').style.display = 'none';
     document.getElementById('orderSuccessStep').style.display = 'block';
   }, 900);
+}
+
+/**
+ * 電子發票類型切換時動態顯示/隱藏載具統編輸入框
+ */
+function handleInvoiceTypeChange() {
+  const invoiceSelect = document.getElementById('custInvoice');
+  const carrierGroup = document.getElementById('carrierGroup');
+  const carrierLabel = document.getElementById('custCarrierLabel');
+  const carrierInput = document.getElementById('custCarrier');
+  if (!invoiceSelect || !carrierGroup || !carrierLabel || !carrierInput) return;
+
+  const val = invoiceSelect.value;
+  if (val === 'mobile') {
+    carrierGroup.style.display = 'block';
+    carrierLabel.textContent = '手機條碼載具 (請輸入 / 開頭之7碼代號) *';
+    carrierInput.placeholder = '例如：/AB12345';
+    carrierInput.required = true;
+  } else if (val === 'company') {
+    carrierGroup.style.display = 'block';
+    carrierLabel.textContent = '統一編號與買受人抬頭 *';
+    carrierInput.placeholder = '例如：12345678（宏碁股份有限公司）';
+    carrierInput.required = true;
+  } else {
+    carrierGroup.style.display = 'none';
+    carrierInput.required = false;
+    carrierInput.value = '';
+  }
 }
 
 /* ==========================================================================

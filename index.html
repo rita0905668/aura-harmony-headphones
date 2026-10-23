@@ -875,7 +875,7 @@
               </div>
               <div class="form-group">
                 <label for="custInvoice">電子發票格式</label>
-                <select id="custInvoice" class="form-input">
+                <select id="custInvoice" class="form-input" onchange="handleInvoiceTypeChange()">
                   <option value="cloud">個人雲端發票（會員載具）</option>
                   <option value="mobile">手機條碼載具</option>
                   <option value="company">公司三聯式統一發票</option>
@@ -884,9 +884,20 @@
               </div>
             </div>
 
+            <!-- 動態載具/統編輸入框 -->
+            <div class="form-group" id="carrierGroup" style="display: none;">
+              <label for="custCarrier" id="custCarrierLabel">手機條碼載具 *</label>
+              <input type="text" id="custCarrier" class="form-input" placeholder="例如：/AB12345">
+            </div>
+
             <div class="form-group">
               <label for="custAddress">配送地址（限台灣本島及澎金馬） *</label>
               <input type="text" id="custAddress" class="form-input" placeholder="例如：台北市信義區信義路五段7號89樓" required>
+            </div>
+
+            <div class="form-group">
+              <label for="custNotes">訂單備註 / 配送特殊需求（選填）</label>
+              <input type="text" id="custNotes" class="form-input" placeholder="例如：請管理室代收、週末白天送達、送達前請先電聯">
             </div>
           </div>
 
