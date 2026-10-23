@@ -248,3 +248,34 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+/**
+ * ============================================================================
+ * 【一鍵開通寄信權限測試函式】
+ * ============================================================================
+ * 這是 Google 的必經安全機制：
+ * 第一次在 Apps Script 中使用寄信功能時，必須在編輯器中「手動執行一次」，
+ * 才能觸發 Google 跳出授權視窗並按下「允許」，之後網頁下單才能順利寄信。
+ *
+ * 【操作步驟】：
+ * 1. 在 Apps Script 上方工具列找到下拉選單（原本可能是 doPost），切換選擇為「testSendEmail」。
+ * 2. 點擊旁邊的【執行】按鈕 (Run)。
+ * 3. Google 會彈出「需要授權」視窗：
+ *    點選【審查權限】➜ 選擇您的 Google 帳號 ➜ 點選【進階】➜ 點選【前往「專案名稱」（不安全）】➜ 點選【允許】。
+ * 4. 執行完畢後，檢查您的信箱是否收到測試信。收到即代表開通成功！
+ */
+function testSendEmail() {
+  var myEmail = Session.getActiveUser().getEmail();
+  if (!myEmail) {
+    myEmail = "rita0905668@gmail.com";
+  }
+
+  MailApp.sendEmail({
+    to: myEmail,
+    subject: "【AURA SOUND】系統自動寄信權限開通成功！",
+    body: "恭喜您！當您看到這封信，代表您的 Google Apps Script 已經正式獲得寄信授權。\n\n現在顧客在公開網站下單，系統就會自動寄發訂單成立通知信！",
+    name: "AURA SOUND 官方旗艦店"
+  });
+
+  Logger.log("測試信件已成功送出至：" + myEmail);
+}
